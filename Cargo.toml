@@ -28,3 +28,12 @@ members = [
 
 [patch."https://github.com/paritytech/polkadot"]
 polkadot-service = { path = "polkadot/node/service" }
+xcm = { path = "polkadot/xcm" }
+xcm-builder = { path = "polkadot/xcm/xcm-builder" }
+xcm-executor = { path = "polkadot/xcm/xcm-executor" }
+pallet-xcm = { path = "polkadot/xcm/pallet-xcm" }
+
+[patch."https://github.com/paritytech/cumulus"]
+cumulus-pallet-dmp-queue = { path = "cumulus/dmp-queue" }
+cumulus-pallet-xcm = { path = "cumulus/xcm" }
+cumulus-pallet-xcmp-queue = { path = "cumulus/xcmp-queue" }

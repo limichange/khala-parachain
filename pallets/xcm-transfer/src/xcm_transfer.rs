@@ -3,7 +3,7 @@ pub use self::pallet::*;
 #[allow(unused_variables)]
 #[frame_support::pallet]
 pub mod pallet {
-	use crate::assets as xtransfer_assets;
+	use crate::common;
 	use crate::xcm_helper::ConcrateAsset;
 	use cumulus_primitives_core::ParaId;
 	use frame_support::{
@@ -19,9 +19,7 @@ pub mod pallet {
 		DispatchError,
 	};
 	use sp_std::{convert::TryInto, prelude::*, vec};
-	use xcm::latest::{
-		prelude::*, AssetId::Concrete, Fungibility::Fungible, MultiAsset, MultiLocation,
-	};
+	use xcm::latest::{prelude::*, Fungibility::Fungible, MultiAsset, MultiLocation};
 	use xcm_executor::traits::{InvertLocation, WeightBounds};
 
 	/// The logging target.
@@ -37,7 +35,7 @@ pub mod pallet {
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + xtransfer_assets::Config {
+	pub trait Config: frame_system::Config {
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 
 		type Currency: Currency<Self::AccountId>;
@@ -62,6 +60,10 @@ pub mod pallet {
 
 		/// Means of inverting a location.
 		type LocationInverter: InvertLocation;
+
+		/// ParachainID
+		#[pallet::constant]
+		type ParachainInfo: Get<ParaId>;
 	}
 
 	/// Mapping asset name to corresponding MultiAsset
@@ -85,7 +87,6 @@ pub mod pallet {
 		ExecutionFailed,
 		UnknownTransfer,
 		AssetNotFound,
-		AssetNotSupported,
 		LocationInvertFailed,
 	}
 
@@ -96,40 +97,17 @@ pub mod pallet {
 		BalanceOf<T>: Into<u128>,
 	{
 		#[pallet::weight(195_000_000 + Pallet::<T>::estimate_transfer_weight())]
-		pub fn transfer_by_asset_identity(
-			origin: OriginFor<T>,
-			asset_identity: Vec<u8>,
-			para_id: ParaId,
-			recipient: T::AccountId,
-			amount: BalanceOf<T>,
-			dest_weight: Weight,
-		) -> DispatchResult {
-			// get asset location by identity
-			let asset_info = xtransfer_assets::AssetsIdentityToInfo::<T>::get(&asset_identity)
-				.ok_or(Error::<T>::AssetNotFound)?;
-			let asset_location: MultiLocation = asset_info
-				.try_into()
-				.map_err(|_| Error::<T>::AssetNotSupported)?;
-			let asset: MultiAsset = (asset_location, amount.into()).into();
-
-			Self::do_transfer(origin, asset, para_id, recipient, amount, dest_weight)
-		}
-
-		#[pallet::weight(195_000_000 + Pallet::<T>::estimate_transfer_weight())]
 		pub fn transfer_by_asset_id(
 			origin: OriginFor<T>,
-			asset_id: xtransfer_assets::XTransferAssetId,
+			asset: common::XTransferAsset,
 			para_id: ParaId,
 			recipient: T::AccountId,
 			amount: BalanceOf<T>,
 			dest_weight: Weight,
 		) -> DispatchResult {
 			// get asset location by asset id
-			let asset_info = xtransfer_assets::AssetIdToInfo::<T>::get(&asset_id)
-				.ok_or(Error::<T>::AssetNotFound)?;
-			let asset_location: MultiLocation = asset_info
-				.try_into()
-				.map_err(|_| Error::<T>::AssetNotSupported)?;
+			let asset_location: MultiLocation =
+				asset.try_into().map_err(|_| Error::<T>::AssetNotFound)?;
 			let asset: MultiAsset = (asset_location, amount.into()).into();
 
 			Self::do_transfer(origin, asset, para_id, recipient, amount, dest_weight)
@@ -405,114 +383,114 @@ mod test {
 
 	#[test]
 	fn test_transfer_native_to_parachain() {
-		TestNet::reset();
+		// TestNet::reset();
 
-		ParaA::execute_with(|| {
-			// ParaA register it's own native asset
-			assert_ok!(XTransferAssets::register_asset(
-				ParaOrigin::root(),
-				b"ParaA Native Asset".to_vec(),
-				(0, Here).into(),
-			));
-		});
+		// ParaA::execute_with(|| {
+		// 	// ParaA register it's own native asset
+		// 	assert_ok!(XTransferAssets::register_asset(
+		// 		ParaOrigin::root(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		(0, Here).into(),
+		// 	));
+		// });
 
-		ParaB::execute_with(|| {
-			// ParaB register the native asset of paraA
-			assert_ok!(XTransferAssets::register_asset(
-				ParaOrigin::root(),
-				b"ParaA Native Asset".to_vec(),
-				(1, X1(Parachain(1u32.into())),).into(),
-			));
-		});
+		// ParaB::execute_with(|| {
+		// 	// ParaB register the native asset of paraA
+		// 	assert_ok!(XTransferAssets::register_asset(
+		// 		ParaOrigin::root(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		(1, X1(Parachain(1u32.into())),).into(),
+		// 	));
+		// });
 
-		ParaA::execute_with(|| {
-			// ParaA send it's own native asset to paraB
-			assert_ok!(XcmTransfer::transfer_by_asset_identity(
-				Some(ALICE).into(),
-				b"ParaA Native Asset".to_vec(),
-				2u32.into(),
-				BOB,
-				10,
-				1,
-			));
+		// ParaA::execute_with(|| {
+		// 	// ParaA send it's own native asset to paraB
+		// 	assert_ok!(XcmTransfer::transfer_by_asset_identity(
+		// 		Some(ALICE).into(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		2u32.into(),
+		// 		BOB,
+		// 		10,
+		// 		1,
+		// 	));
 
-			assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
-		});
+		// 	assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
+		// });
 
-		ParaB::execute_with(|| {
-			assert_eq!(
-				XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
-				10 - 1
-			);
-		});
+		// ParaB::execute_with(|| {
+		// 	assert_eq!(
+		// 		XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
+		// 		10 - 1
+		// 	);
+		// });
 	}
 
 	#[test]
 	fn test_transfer_to_resolve_parachain() {
-		TestNet::reset();
+		// TestNet::reset();
 
-		ParaA::execute_with(|| {
-			// ParaA register it's own native asset
-			assert_ok!(XTransferAssets::register_asset(
-				ParaOrigin::root(),
-				b"ParaA Native Asset".to_vec(),
-				(0, Here).into(),
-			));
-		});
+		// ParaA::execute_with(|| {
+		// 	// ParaA register it's own native asset
+		// 	assert_ok!(XTransferAssets::register_asset(
+		// 		ParaOrigin::root(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		(0, Here).into(),
+		// 	));
+		// });
 
-		ParaB::execute_with(|| {
-			// ParaB register the native asset of paraA
-			assert_ok!(XTransferAssets::register_asset(
-				ParaOrigin::root(),
-				b"ParaA Native Asset".to_vec(),
-				(1, X1(Parachain(1u32.into())),).into(),
-			));
-		});
+		// ParaB::execute_with(|| {
+		// 	// ParaB register the native asset of paraA
+		// 	assert_ok!(XTransferAssets::register_asset(
+		// 		ParaOrigin::root(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		(1, X1(Parachain(1u32.into())),).into(),
+		// 	));
+		// });
 
-		ParaA::execute_with(|| {
-			// ParaA send it's own native asset to paraB
-			assert_ok!(XcmTransfer::transfer_by_asset_identity(
-				Some(ALICE).into(),
-				b"ParaA Native Asset".to_vec(),
-				2u32.into(),
-				BOB,
-				10,
-				1,
-			));
+		// ParaA::execute_with(|| {
+		// 	// ParaA send it's own native asset to paraB
+		// 	assert_ok!(XcmTransfer::transfer_by_asset_identity(
+		// 		Some(ALICE).into(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		2u32.into(),
+		// 		BOB,
+		// 		10,
+		// 		1,
+		// 	));
 
-			assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
-			assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 10);
-		});
+		// 	assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
+		// 	assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 10);
+		// });
 
-		ParaB::execute_with(|| {
-			assert_eq!(
-				XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
-				10 - 1
-			);
-		});
+		// ParaB::execute_with(|| {
+		// 	assert_eq!(
+		// 		XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
+		// 		10 - 1
+		// 	);
+		// });
 
-		// now, let's transfer back to paraA
-		ParaB::execute_with(|| {
-			// ParaB send back ParaA's native asset
-			assert_ok!(XcmTransfer::transfer_by_asset_identity(
-				Some(BOB).into(),
-				b"ParaA Native Asset".to_vec(),
-				1u32.into(),
-				ALICE,
-				5,
-				1,
-			));
+		// // now, let's transfer back to paraA
+		// ParaB::execute_with(|| {
+		// 	// ParaB send back ParaA's native asset
+		// 	assert_ok!(XcmTransfer::transfer_by_asset_identity(
+		// 		Some(BOB).into(),
+		// 		b"ParaA Native Asset".to_vec(),
+		// 		1u32.into(),
+		// 		ALICE,
+		// 		5,
+		// 		1,
+		// 	));
 
-			assert_eq!(
-				XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
-				9 - 5
-			);
-		});
+		// 	assert_eq!(
+		// 		XTransferAssets::free_balance(&(1, X1(Parachain(1u32.into())),).into(), &BOB),
+		// 		9 - 5
+		// 	);
+		// });
 
-		ParaA::execute_with(|| {
-			assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 5);
-			assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10 + 4);
-		});
+		// ParaA::execute_with(|| {
+		// 	assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 5);
+		// 	assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10 + 4);
+		// });
 	}
 
 	#[test]

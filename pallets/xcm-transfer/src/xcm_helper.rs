@@ -1,32 +1,34 @@
 pub use self::xcm_helper::*;
 
 pub mod xcm_helper {
+	use crate::common::XTransferAsset;
 	use cumulus_primitives_core::ParaId;
-	use frame_support::{pallet_prelude::*, traits::Contains};
+	use frame_support::pallet_prelude::*;
 	use sp_runtime::traits::CheckedConversion;
-	use sp_std::{convert::TryFrom, marker::PhantomData, vec::Vec};
-	use xcm::latest::{
-		prelude::*,
-		AssetId::{Abstract, Concrete},
-		Fungibility::Fungible,
-		MultiAsset, MultiLocation,
+	use sp_std::{
+		convert::{Into, TryFrom, TryInto},
+		marker::PhantomData,
+		result,
 	};
-	use xcm_executor::traits::{FilterAssetLocation, MatchesFungible};
+	use xcm::latest::{
+		prelude::*, AssetId::Concrete, Fungibility::Fungible, MultiAsset, MultiLocation,
+	};
+	use xcm_executor::traits::{
+		Error as XcmError, FilterAssetLocation, MatchesFungible, MatchesFungibles,
+	};
 
 	const LOG_TARGET: &str = "xcm-helper";
 
-	pub struct IsSiblingParachainsConcrete<T>(PhantomData<T>);
-	impl<T: Contains<MultiLocation>, B: TryFrom<u128>> MatchesFungible<B>
-		for IsSiblingParachainsConcrete<T>
-	{
+	pub struct NativeAssetMatcher<C>(PhantomData<C>);
+	impl<C: NativeAssetChecker, B: TryFrom<u128>> MatchesFungible<B> for NativeAssetMatcher<C> {
 		fn matches_fungible(a: &MultiAsset) -> Option<B> {
 			log::trace!(
 				target: LOG_TARGET,
-				"IsSiblingParachainsConcrete check fungible {:?}.",
+				"NativeAssetMatcher check fungible {:?}.",
 				a.clone(),
 			);
 			match (&a.id, &a.fun) {
-				(Concrete(ref id), Fungible(ref amount)) if T::contains(id) => {
+				(Concrete(_), Fungible(ref amount)) if C::is_native_asset(a) => {
 					CheckedConversion::checked_from(*amount)
 				}
 				_ => None,
@@ -34,20 +36,29 @@ pub mod xcm_helper {
 		}
 	}
 
-	pub struct IsSiblingParachainsAbstract<T>(PhantomData<T>);
-	impl<T: Contains<Vec<u8>>, B: TryFrom<u128>> MatchesFungible<B> for IsSiblingParachainsAbstract<T> {
-		fn matches_fungible(a: &MultiAsset) -> Option<B> {
+	pub struct ConcreteAssetsMatcher<AssetId, Balance>(PhantomData<(AssetId, Balance)>);
+	impl<AssetId: Clone + From<XTransferAsset>, Balance: Clone + From<u128>>
+		MatchesFungibles<AssetId, Balance> for ConcreteAssetsMatcher<AssetId, Balance>
+	{
+		fn matches_fungibles(a: &MultiAsset) -> result::Result<(AssetId, Balance), XcmError> {
 			log::trace!(
 				target: LOG_TARGET,
-				"IsSiblingParachainsAbstract check fungible {:?}.",
+				"ConcreteAssetsMatcher check fungible {:?}.",
 				a.clone(),
 			);
-			match (&a.id, &a.fun) {
-				(Abstract(ref id), Fungible(ref amount)) if T::contains(&id) => {
-					CheckedConversion::checked_from(*amount)
-				}
-				_ => None,
-			}
+			let (&amount, location) = match (&a.fun, &a.id) {
+				(Fungible(ref amount), Concrete(ref id)) => (amount, id),
+				_ => return Err(XcmError::AssetNotFound),
+			};
+			let xtransfer_asset: XTransferAsset = location
+			.clone()
+			.try_into()
+			.map_err(|_| XcmError::AssetIdConversionFailed)?;
+
+			let amount = amount
+				.try_into()
+				.map_err(|_| XcmError::AmountToBalanceConversionFailed)?;
+			Ok((xtransfer_asset.into(), amount))
 		}
 	}
 
@@ -67,20 +78,25 @@ pub mod xcm_helper {
 
 	pub struct NativeAssetFilter<T>(PhantomData<T>);
 	impl<T: Get<ParaId>> NativeAssetFilter<T> {
-		pub fn is_native_asset(asset: &MultiAsset) -> bool {
-			match (&asset.id, &asset.fun) {
-				// So far our native asset is concrete
-				(Concrete(ref id), Fungible(_)) if Self::is_native_asset_id(id) => true,
-				_ => false,
-			}
-		}
-
 		pub fn is_native_asset_id(id: &MultiLocation) -> bool {
 			let native_locations = [
 				MultiLocation::here(),
 				(1, X1(Parachain(T::get().into()))).into(),
 			];
 			native_locations.contains(id)
+		}
+	}
+
+	pub trait NativeAssetChecker {
+		fn is_native_asset(asset: &MultiAsset) -> bool;
+	}
+	impl<T: Get<ParaId>> NativeAssetChecker for NativeAssetFilter<T> {
+		fn is_native_asset(asset: &MultiAsset) -> bool {
+			match (&asset.id, &asset.fun) {
+				// So far our native asset is concrete
+				(Concrete(ref id), Fungible(_)) if Self::is_native_asset_id(id) => true,
+				_ => false,
+			}
 		}
 	}
 

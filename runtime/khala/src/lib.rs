@@ -102,10 +102,11 @@ pub use parachains_common::Index;
 
 pub use phala_pallets::{pallet_mining, pallet_mq, pallet_registry, pallet_stakepool};
 
+use xtransfer_pallets::common::XTransferAssetId;
 pub use xtransfer_pallets::{
-    pallet_xtransfer_assets,
     pallet_xcm_transfer,
     xcm_helper,
+    common as xtransfer_common,
 };
 
 
@@ -215,6 +216,7 @@ construct_runtime! {
         // Monetary stuff
         Balances: pallet_balances::{Pallet, Call, Storage, Config<T>, Event<T>} = 40,
         TransactionPayment: pallet_transaction_payment::{Pallet, Storage} = 41,
+		Assets: pallet_assets::{Pallet, Call, Storage, Event<T>} = 42,
 
         // Collator support. the order of these 5 are important and shall not change.
         Authorship: pallet_authorship::{Pallet, Call, Storage} = 50,
@@ -241,7 +243,6 @@ construct_runtime! {
         ChainBridge: pallet_bridge::{Pallet, Call, Storage, Event<T>} = 80,
         BridgeTransfer: pallet_bridge_transfer::{Pallet, Call, Event<T>, Storage} = 81,
         XcmTransfer: pallet_xcm_transfer::{Pallet, Call, Event<T>, Storage} = 82,
-        XTransferAssets: pallet_xtransfer_assets::{Pallet, Call, Event<T>, Storage} = 83,
 
         // Phala
         PhalaMq: pallet_mq::{Pallet, Call, Storage} = 85,
@@ -276,10 +277,9 @@ impl Contains<Call> for BaseCallFilter {
             // Collator
             Call::Authorship(_) | Call::CollatorSelection(_) | Call::Session(_) |
             // XCM
-            // Call::XcmpQueue { .. } |
-            // Call::DmpQueue { .. } |
-            // Call::XcmTransfer { .. } |
-            // Call::XTransferAssets { .. } |
+            Call::XcmpQueue { .. } |
+            Call::DmpQueue { .. } |
+            Call::XcmTransfer { .. } |
             // Governance
             Call::Identity { .. } | Call::Treasury { .. } |
             Call::Democracy { .. } | Call::PhragmenElection { .. } |
@@ -566,6 +566,32 @@ impl pallet_balances::Config for Runtime {
 }
 
 parameter_types! {
+	pub const AssetDeposit: Balance = 1 * CENTS; // 1 CENTS deposit to create asset
+	pub const ApprovalDeposit: Balance = 1 * CENTS;
+	pub const AssetsStringLimit: u32 = 50;
+	/// Key = 32 bytes, Value = 36 bytes (32+1+1+1+1)
+	// https://github.com/paritytech/substrate/blob/069917b/frame/assets/src/lib.rs#L257L271
+	pub const MetadataDepositBase: Balance = deposit(1, 68);
+	pub const MetadataDepositPerByte: Balance = deposit(0, 1);
+}
+
+impl pallet_assets::Config for Runtime {
+	type Event = Event;
+	type Balance = Balance;
+	type AssetId = xtransfer_common::XTransferAssetId;
+	type Currency = Balances;
+	type ForceOrigin = EnsureRoot<AccountId>;
+	type AssetDeposit = AssetDeposit;
+	type MetadataDepositBase = MetadataDepositBase;
+	type MetadataDepositPerByte = MetadataDepositPerByte;
+	type ApprovalDeposit = ApprovalDeposit;
+	type StringLimit = AssetsStringLimit;
+	type Freezer = ();
+	type Extra = ();
+	type WeightInfo = pallet_assets::weights::SubstrateWeight<Runtime>;
+}
+
+parameter_types! {
     pub const TransactionByteFee: Balance = 1 * MILLICENTS;
     pub const TargetBlockFullness: Perquintill = Perquintill::from_percent(25);
     pub const OperationalFeeMultiplier: u8 = 5;
@@ -766,15 +792,54 @@ pub type Barrier = (
 	AllowSubscriptionsFrom<Everything>,
 );
 
+/// Means for transacting the native currency on this chain.
+pub type CurrencyTransactor = CurrencyAdapter<
+	// Use this currency:
+	Balances,
+	// Use this currency when it is a fungible asset matching the given location or name:
+	xcm_helper::NativeAssetMatcher<xcm_helper::NativeAssetFilter<ParachainInfo>>,
+	// Convert an XCM MultiLocation into a local account id:
+	LocationToAccountId,
+	// Our chain's account ID type (we can't get away without mentioning it explicitly):
+	AccountId,
+	// We don't track any teleports of `Balances`.
+	(),
+>;
+
+pub struct AssetChecker;
+impl Contains<XTransferAssetId> for AssetChecker {
+    fn contains(_: &XTransferAssetId) -> bool {
+        false
+    }
+}
+
+/// Means for transacting assets besides the native currency on this chain.
+pub type FungiblesTransactor = FungiblesAdapter<
+	// Use this fungibles implementation:
+	Assets,
+	// Use this currency when it is a fungible asset matching the given location or name:
+	xcm_helper::ConcreteAssetsMatcher<xtransfer_common::XTransferAssetId, Balance>,
+	// Convert an XCM MultiLocation into a local account id:
+	LocationToAccountId,
+	// Our chain's account ID type (we can't get away without mentioning it explicitly):
+	AccountId,
+	// We do not support teleport assets
+	AssetChecker,
+	// We do not support teleport assets
+	(),
+>;
+/// Means for transacting assets on this chain.
+pub type AssetTransactors = (CurrencyTransactor, FungiblesTransactor);
+
 pub struct XcmConfig;
 impl Config for XcmConfig {
 	type Call = Call;
 	type XcmSender = XcmRouter;
 	// How to withdraw and deposit an asset.
-	type AssetTransactor = XTransferAssets;
+	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
 	type IsReserve = xcm_helper::AssetOriginFilter;
-	type IsTeleporter = (); // <- should be enough to allow teleportation of KSM
+	type IsTeleporter = ();
 	type LocationInverter = LocationInverter<Ancestry>;
 	type Barrier = Barrier;
 	type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
@@ -827,14 +892,6 @@ impl pallet_xcm_transfer::Config for Runtime {
     type XcmExecutor = XcmExecutor<XcmConfig>;
     type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
     type LocationInverter = LocationInverter<Ancestry>;
-}
-
-impl pallet_xtransfer_assets::Config for Runtime {
-	type Event = Event;
-	type Currency = Balances;
-    type XTransferCommitteeOrigin = EnsureRootOrHalfCouncil;
-    type FungibleMatcher = xcm_helper::IsSiblingParachainsConcrete<XTransferAssets>;
-    type AccountIdConverter = LocationToAccountId;
     type ParachainInfo = ParachainInfo;
 }
 
@@ -1362,6 +1419,7 @@ impl_runtime_apis! {
             list_benchmark!(list, extra, pallet_utility, Utility);
             list_benchmark!(list, extra, pallet_vesting, Vesting);
             list_benchmark!(list, extra, pallet_lottery, Lottery);
+            list_benchmark!(list, extra, pallet_assets, Lottery);
             // TODO: panic
             list_benchmark!(list, extra, pallet_collator_selection, CollatorSelection);
 
@@ -1419,6 +1477,7 @@ impl_runtime_apis! {
             add_benchmark!(params, batches, pallet_utility, Utility);
             add_benchmark!(params, batches, pallet_vesting, Vesting);
             add_benchmark!(params, batches, pallet_lottery, Lottery);
+            add_benchmark!(params, batches, pallet_assets, Lottery);
             // TODO: panic
             add_benchmark!(params, batches, pallet_collator_selection, CollatorSelection);
 

@@ -251,7 +251,7 @@ construct_runtime! {
         PhalaStakePool: pallet_stakepool::{Pallet, Call, Event<T>, Storage} = 88,
 
         // `sudo` has been removed on production
-        // Sudo: pallet_sudo::{Pallet, Call, Storage, Config<T>, Event<T>} = 99,
+        Sudo: pallet_sudo::{Pallet, Call, Storage, Config<T>, Event<T>} = 99,
         // `OTT` has been removed, the index should be kept
         // PhalaOneshotTransfer: pallet_ott::{Pallet, Call, Event<T>, Storage} = 100,
     }
@@ -263,7 +263,7 @@ impl Contains<Call> for BaseCallFilter {
         matches!(
             call,
             // `sudo` has been removed on production
-            // Call::Sudo { .. } |
+            Call::Sudo { .. } |
             // System
             Call::System { .. } | Call::Timestamp { .. } | Call::Utility { .. } |
             Call::Multisig { .. } | Call::Proxy { .. } | Call::Scheduler { .. } |
@@ -708,10 +708,10 @@ impl pallet_lottery::Config for Runtime {
 }
 
 // `sudo` has been removed on production
-// impl pallet_sudo::Config for Runtime {
-//     type Call = Call;
-//     type Event = Event;
-// }
+impl pallet_sudo::Config for Runtime {
+    type Call = Call;
+    type Event = Event;
+}
 
 parameter_types! {
     pub const ReservedXcmpWeight: Weight = MAXIMUM_BLOCK_WEIGHT / 4;
@@ -740,6 +740,8 @@ parameter_types! {
     pub Ancestry: MultiLocation = Parachain(ParachainInfo::parachain_id().into()).into();
     pub const DOTMultiAssetId: MultiLocation = MultiLocation { parents: 1, interior: Here };
     pub KARMultiAssetId: MultiLocation = MultiLocation { parents: 1, interior: X2(Parachain(parachains::karura::ID), GeneralKey(parachains::karura::KAR_KEY.to_vec())) };
+    pub const Para2004MultiAssetId: MultiLocation = MultiLocation { parents: 1, interior: X1(Parachain(2004)) };
+	pub const Para2005MultiAssetId: MultiLocation = MultiLocation { parents: 1, interior: X1(Parachain(2005)) };
 }
 
 /// Type for specifying how a `MultiLocation` can be converted into an `AccountId`. This is used
@@ -828,15 +830,13 @@ pub type FungiblesTransactor = FungiblesAdapter<
 	// We do not support teleport assets
 	(),
 >;
-/// Means for transacting assets on this chain.
-pub type AssetTransactors = (CurrencyTransactor, FungiblesTransactor);
 
 pub struct XcmConfig;
 impl Config for XcmConfig {
 	type Call = Call;
 	type XcmSender = XcmRouter;
 	// How to withdraw and deposit an asset.
-	type AssetTransactor = AssetTransactors;
+	type AssetTransactor = xcm_helper::XTransferAdapter<CurrencyTransactor, FungiblesTransactor, xcm_helper::NativeAssetFilter<ParachainInfo>>;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
 	type IsReserve = xcm_helper::AssetOriginFilter;
 	type IsTeleporter = ();
@@ -846,6 +846,8 @@ impl Config for XcmConfig {
 	type Trader = (
         UsingComponents<IdentityFee<Balance>, DOTMultiAssetId, AccountId, Balances, ()>,
         UsingComponents<IdentityFee<Balance>, KARMultiAssetId, AccountId, Balances, ()>,
+        UsingComponents<IdentityFee<Balance>, Para2004MultiAssetId, AccountId, Balances, ()>,
+        UsingComponents<IdentityFee<Balance>, Para2005MultiAssetId, AccountId, Balances, ()>,
     );
 	type ResponseHandler = ();
 	type AssetTrap = ();

@@ -2,11 +2,11 @@ pub use self::common::*;
 
 pub mod common {
 	use codec::{Decode, Encode};
-	use core::{
+	use scale_info::TypeInfo;
+	use sp_std::{
 		convert::{From, TryFrom, TryInto},
 		result,
 	};
-	use scale_info::TypeInfo;
 	use xcm::latest::MultiLocation;
 
 	#[derive(Clone, Decode, Encode, Eq, PartialEq, Ord, PartialOrd, Debug, TypeInfo)]

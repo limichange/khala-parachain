@@ -201,9 +201,9 @@ pub type CurrencyTransactor = CurrencyAdapter<
 
 pub struct AssetChecker;
 impl Contains<common::XTransferAssetId> for AssetChecker {
-    fn contains(_: &common::XTransferAssetId) -> bool {
-        false
-    }
+	fn contains(_: &common::XTransferAssetId) -> bool {
+		false
+	}
 }
 
 /// Means for transacting assets besides the native currency on this chain.
@@ -221,14 +221,16 @@ pub type FungiblesTransactor = FungiblesAdapter<
 	// We do not support teleport assets
 	(),
 >;
-/// Means for transacting assets on this chain.
-pub type AssetTransactors = (CurrencyTransactor, FungiblesTransactor);
 
 pub struct XcmConfig;
 impl Config for XcmConfig {
 	type Call = Call;
 	type XcmSender = XcmRouter;
-	type AssetTransactor = AssetTransactors;
+	type AssetTransactor = xcm_helper::XTransferAdapter<
+		CurrencyTransactor,
+		FungiblesTransactor,
+		xcm_helper::NativeAssetFilter<ParachainInfo>,
+	>;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
 	type IsReserve = NativeAsset;
 	type IsTeleporter = ();

@@ -11,10 +11,15 @@ pub mod xcm_helper {
 		result,
 	};
 	use xcm::latest::{
-		prelude::*, AssetId::Concrete, Fungibility::Fungible, MultiAsset, MultiLocation,
+		prelude::*, AssetId::Concrete, Error as XcmError, Fungibility::Fungible, MultiAsset,
+		MultiLocation, Result as XcmResult,
 	};
-	use xcm_executor::traits::{
-		Error as XcmError, FilterAssetLocation, MatchesFungible, MatchesFungibles,
+	use xcm_executor::{
+		traits::{
+			Error as MatchError, FilterAssetLocation, MatchesFungible, MatchesFungibles,
+			TransactAsset,
+		},
+		Assets,
 	};
 
 	const LOG_TARGET: &str = "xcm-helper";
@@ -40,7 +45,7 @@ pub mod xcm_helper {
 	impl<AssetId: Clone + From<XTransferAsset>, Balance: Clone + From<u128>>
 		MatchesFungibles<AssetId, Balance> for ConcreteAssetsMatcher<AssetId, Balance>
 	{
-		fn matches_fungibles(a: &MultiAsset) -> result::Result<(AssetId, Balance), XcmError> {
+		fn matches_fungibles(a: &MultiAsset) -> result::Result<(AssetId, Balance), MatchError> {
 			log::trace!(
 				target: LOG_TARGET,
 				"ConcreteAssetsMatcher check fungible {:?}.",
@@ -48,16 +53,16 @@ pub mod xcm_helper {
 			);
 			let (&amount, location) = match (&a.fun, &a.id) {
 				(Fungible(ref amount), Concrete(ref id)) => (amount, id),
-				_ => return Err(XcmError::AssetNotFound),
+				_ => return Err(MatchError::AssetNotFound),
 			};
 			let xtransfer_asset: XTransferAsset = location
-			.clone()
-			.try_into()
-			.map_err(|_| XcmError::AssetIdConversionFailed)?;
+				.clone()
+				.try_into()
+				.map_err(|_| MatchError::AssetIdConversionFailed)?;
 
 			let amount = amount
 				.try_into()
-				.map_err(|_| XcmError::AmountToBalanceConversionFailed)?;
+				.map_err(|_| MatchError::AmountToBalanceConversionFailed)?;
 			Ok((xtransfer_asset.into(), amount))
 		}
 	}
@@ -124,6 +129,60 @@ pub mod xcm_helper {
 					_ => None,
 				}
 			})
+		}
+	}
+
+	pub struct XTransferAdapter<NativeAdapter, AssetsAdapter, NativeChecker>(
+		PhantomData<(NativeAdapter, AssetsAdapter, NativeChecker)>,
+	);
+
+	impl<
+			NativeAdapter: TransactAsset,
+			AssetsAdapter: TransactAsset,
+			NativeChecker: NativeAssetChecker,
+		> TransactAsset for XTransferAdapter<NativeAdapter, AssetsAdapter, NativeChecker>
+	{
+		fn can_check_in(_origin: &MultiLocation, what: &MultiAsset) -> XcmResult {
+			if NativeChecker::is_native_asset(what) {
+				NativeAdapter::can_check_in(_origin, what)
+			} else {
+				AssetsAdapter::can_check_in(_origin, what)
+			}
+		}
+
+		fn check_in(_origin: &MultiLocation, what: &MultiAsset) {
+			if NativeChecker::is_native_asset(what) {
+				NativeAdapter::check_in(_origin, what)
+			} else {
+				AssetsAdapter::check_in(_origin, what)
+			}
+		}
+
+		fn check_out(_dest: &MultiLocation, what: &MultiAsset) {
+			if NativeChecker::is_native_asset(what) {
+				NativeAdapter::check_out(_dest, what)
+			} else {
+				AssetsAdapter::check_out(_dest, what)
+			}
+		}
+
+		fn deposit_asset(what: &MultiAsset, who: &MultiLocation) -> XcmResult {
+			if NativeChecker::is_native_asset(what) {
+				NativeAdapter::deposit_asset(what, who)
+			} else {
+				AssetsAdapter::deposit_asset(what, who)
+			}
+		}
+
+		fn withdraw_asset(
+			what: &MultiAsset,
+			who: &MultiLocation,
+		) -> result::Result<Assets, XcmError> {
+			if NativeChecker::is_native_asset(what) {
+				NativeAdapter::withdraw_asset(what, who)
+			} else {
+				AssetsAdapter::withdraw_asset(what, who)
+			}
 		}
 	}
 }

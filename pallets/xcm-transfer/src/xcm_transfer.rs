@@ -375,7 +375,7 @@ mod test {
 	};
 	use xcm_simulator::TestExt;
 
-	use crate::common::XTransferAsset;
+	use crate::common::{XTransferAsset, XTransferAssetId};
 	use crate::mock::{
 		para::Assets as ParaAssets, para::Event as ParaEvent, para::Origin as ParaOrigin, para_ext,
 		para_take_events, relay::Origin as RelayOrigin, relay_ext, ParaA, ParaB, ParaBalances,
@@ -538,4 +538,21 @@ mod test {
 
 	#[test]
 	fn test_transfer_to_unresolve_parachain() {}
+
+	#[test]
+	fn test_dump_assetid() {
+		let ID: u32 = 2000;
+		let KAR_KEY: [u8; 2] = [0, 128];
+
+		let kar_location: MultiLocation = MultiLocation {
+			parents: 1,
+			interior: X2(Parachain(ID), GeneralKey(KAR_KEY.to_vec())),
+		};
+		let kar: XTransferAsset = kar_location.try_into().unwrap();
+
+		assert_eq!(
+			XcmTransfer::derive_assetid(kar),
+			43514260372231685835281715822895635823
+		);
+	}
 }

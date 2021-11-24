@@ -3601,6 +3601,7 @@ dependencies = [
  "pallet-treasury",
  "pallet-utility 4.0.0-dev",
  "pallet-vesting",
+ "pallet-xcm",
  "parachains-common",
  "parity-scale-codec",
  "phala-pallets",

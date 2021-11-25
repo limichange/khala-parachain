@@ -106,8 +106,8 @@ pub use parachains_common::*;
 
 pub use phala_pallets::{pallet_mining, pallet_mq, pallet_registry, pallet_stakepool};
 
-use xtransfer_pallets::common::XTransferAssetId;
-pub use xtransfer_pallets::{common as xtransfer_common, pallet_xcm_transfer, xcm_helper};
+pub use xtransfer_pallets::{pallet_assets_wrapper, pallet_xcm_transfer, xcm_helper};
+pub use pallet_assets_wrapper::XTransferAssetId;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -217,6 +217,7 @@ construct_runtime! {
         Balances: pallet_balances::{Pallet, Call, Storage, Config<T>, Event<T>} = 40,
         TransactionPayment: pallet_transaction_payment::{Pallet, Storage} = 41,
         Assets: pallet_assets::{Pallet, Call, Storage, Event<T>} = 42,
+        AssetsWrapper: pallet_assets_wrapper::{Pallet, Call, Storage, Event<T>} = 43,
 
         // Collator support. the order of these 5 are important and shall not change.
         Authorship: pallet_authorship::{Pallet, Call, Storage} = 50,
@@ -259,7 +260,42 @@ construct_runtime! {
 
 pub struct BaseCallFilter;
 impl Contains<Call> for BaseCallFilter {
-    fn contains(call: &Call) -> bool {
+        fn contains(call: &Call) -> bool {
+        if let Call::PolkadotXcm(xcm_method) = call {
+            match xcm_method {
+                pallet_xcm::Call::send { .. }
+                | pallet_xcm::Call::execute { .. }
+                | pallet_xcm::Call::teleport_assets { .. }
+                | pallet_xcm::Call::reserve_transfer_assets { .. }
+                | pallet_xcm::Call::limited_reserve_transfer_assets { .. }
+                | pallet_xcm::Call::limited_teleport_assets { .. } => {
+                    return false;
+                }
+                pallet_xcm::Call::force_xcm_version { .. }
+                | pallet_xcm::Call::force_default_xcm_version { .. }
+                | pallet_xcm::Call::force_subscribe_version_notify { .. }
+                | pallet_xcm::Call::force_unsubscribe_version_notify { .. } => {
+                    return true;
+                }
+                pallet_xcm::Call::__Ignore { .. } => {
+                    unimplemented!()
+                }
+            }
+        }
+
+        if let Call::Assets(assets_method) = call {
+            match assets_method {
+                pallet_assets::Call::create { .. }
+                | pallet_assets::Call::force_create { .. } => {
+                    return false;
+                }
+                pallet_assets::Call::__Ignore { .. } => {
+                    unimplemented!()
+                }
+                _ => { return true }
+            }
+        }
+
         matches!(
             call,
             // `sudo` has been removed on production
@@ -578,7 +614,7 @@ parameter_types! {
 impl pallet_assets::Config for Runtime {
     type Event = Event;
     type Balance = Balance;
-    type AssetId = xtransfer_common::XTransferAssetId;
+    type AssetId = pallet_assets_wrapper::XTransferAssetId;
     type Currency = Balances;
     type ForceOrigin = EnsureRoot<AccountId>;
     type AssetDeposit = AssetDeposit;
@@ -818,7 +854,7 @@ pub type FungiblesTransactor = FungiblesAdapter<
     // Use this fungibles implementation:
     Assets,
     // Use this currency when it is a fungible asset matching the given location or name:
-    xcm_helper::ConcreteAssetsMatcher<xtransfer_common::XTransferAssetId, Balance>,
+    xcm_helper::ConcreteAssetsMatcher<pallet_assets_wrapper::XTransferAssetId, Balance, AssetsWrapper>,
     // Convert an XCM MultiLocation into a local account id:
     LocationToAccountId,
     // Our chain's account ID type (we can't get away without mentioning it explicitly):
@@ -912,6 +948,11 @@ impl pallet_xcm_transfer::Config for Runtime {
     type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
     type LocationInverter = LocationInverter<Ancestry>;
     type ParachainInfo = ParachainInfo;
+}
+
+impl pallet_assets_wrapper::Config for Runtime {
+    type Event = Event;
+    type AssetsCommitteeOrigin = EnsureRootOrHalfCouncil;
 }
 
 parameter_types! {

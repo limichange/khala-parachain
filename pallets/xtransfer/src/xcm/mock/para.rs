@@ -1,10 +1,11 @@
 use super::ParachainXcmRouter;
-use crate::{common, pallet_xcm_transfer, xcm_helper};
+use crate::{pallet_assets_wrapper, pallet_xcm_transfer, xcm_helper};
+use pallet_assets_wrapper::XTransferAssetId;
 
 use frame_support::{
 	construct_runtime, match_type, parameter_types,
 	traits::{Contains, Everything},
-	weights::{constants::WEIGHT_PER_SECOND, IdentityFee, Weight},
+	weights::{IdentityFee, Weight},
 };
 use frame_system as system;
 use frame_system::EnsureRoot;
@@ -19,11 +20,11 @@ use cumulus_primitives_core::{ChannelStatus, GetChannelInfo, ParaId};
 use polkadot_parachain::primitives::Sibling;
 use xcm::v1::prelude::*;
 use xcm_builder::{
-	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, AllowUnpaidExecutionFrom, CurrencyAdapter,
-	EnsureXcmOrigin, FixedWeightBounds, FungiblesAdapter, LocationInverter, NativeAsset,
-	ParentAsSuperuser, ParentIsDefault, RelayChainAsNative, SiblingParachainAsNative,
-	SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32,
-	SovereignSignedViaLocation, TakeWeightCredit, UsingComponents,
+	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, CurrencyAdapter, EnsureXcmOrigin,
+	FixedWeightBounds, FungiblesAdapter, LocationInverter, NativeAsset, ParentIsDefault,
+	RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
+	UsingComponents,
 };
 use xcm_executor::{Config, XcmExecutor};
 
@@ -61,6 +62,7 @@ construct_runtime!(
 
 		// local palelts
 		XcmTransfer: pallet_xcm_transfer::{Pallet, Call, Event<T>, Storage},
+		AssetsWrapper: pallet_assets_wrapper::{Pallet, Call, Storage, Event<T>},
 	}
 );
 
@@ -122,7 +124,7 @@ parameter_types! {
 impl pallet_assets::Config for Runtime {
 	type Event = Event;
 	type Balance = Balance;
-	type AssetId = common::XTransferAssetId;
+	type AssetId = XTransferAssetId;
 	type Currency = Balances;
 	type ForceOrigin = EnsureRoot<AccountId>;
 	type AssetDeposit = AssetDeposit;
@@ -177,13 +179,7 @@ match_type! {
 		MultiLocation { parents: 1, interior: X1(Plurality { id: BodyId::Executive, .. }) }
 	};
 }
-pub type Barrier = (
-	TakeWeightCredit,
-	AllowTopLevelPaidExecutionFrom<Everything>,
-	// TODO: would be removed when we ready to release, it's unreasonable to let Everything execute without pay.
-	AllowUnpaidExecutionFrom<Everything>,
-	// ^^^ Parent and its exec plurality get free execution
-);
+pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>);
 
 /// Means for transacting the native currency on this chain.
 pub type CurrencyTransactor = CurrencyAdapter<
@@ -200,8 +196,8 @@ pub type CurrencyTransactor = CurrencyAdapter<
 >;
 
 pub struct AssetChecker;
-impl Contains<common::XTransferAssetId> for AssetChecker {
-	fn contains(_: &common::XTransferAssetId) -> bool {
+impl Contains<XTransferAssetId> for AssetChecker {
+	fn contains(_: &XTransferAssetId) -> bool {
 		false
 	}
 }
@@ -211,7 +207,7 @@ pub type FungiblesTransactor = FungiblesAdapter<
 	// Use this fungibles implementation:
 	Assets,
 	// Use this currency when it is a fungible asset matching the given location or name:
-	xcm_helper::ConcreteAssetsMatcher<common::XTransferAssetId, Balance>,
+	xcm_helper::ConcreteAssetsMatcher<XTransferAssetId, Balance, AssetsWrapper>,
 	// Convert an XCM MultiLocation into a local account id:
 	LocationToAccountId,
 	// Our chain's account ID type (we can't get away without mentioning it explicitly):
@@ -290,4 +286,9 @@ impl pallet_xcm_transfer::Config for Runtime {
 	type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
 	type LocationInverter = LocationInverter<Ancestry>;
 	type ParachainInfo = ParachainInfo;
+}
+
+impl pallet_assets_wrapper::Config for Runtime {
+	type Event = Event;
+	type AssetsCommitteeOrigin = frame_system::EnsureRoot<Self::AccountId>;
 }

@@ -3,7 +3,7 @@ pub use self::pallet::*;
 #[allow(unused_variables)]
 #[frame_support::pallet]
 pub mod pallet {
-	use crate::common;
+	use crate::pallet_assets_wrapper;
 	use crate::xcm_helper::ConcrateAsset;
 	use cumulus_primitives_core::ParaId;
 	use frame_support::{
@@ -100,7 +100,7 @@ pub mod pallet {
 		#[pallet::weight(195_000_000 + Pallet::<T>::estimate_transfer_weight())]
 		pub fn transfer_asset(
 			origin: OriginFor<T>,
-			asset: common::XTransferAsset,
+			asset: pallet_assets_wrapper::XTransferAsset,
 			para_id: ParaId,
 			recipient: T::AccountId,
 			amount: BalanceOf<T>,
@@ -109,9 +109,9 @@ pub mod pallet {
 			// get asset location by asset id
 			let asset_location: MultiLocation =
 				asset.try_into().map_err(|_| Error::<T>::AssetNotFound)?;
-			let asset: MultiAsset = (asset_location, amount.into()).into();
+			let multi_asset: MultiAsset = (asset_location, amount.into()).into();
 
-			Self::do_transfer(origin, asset, para_id, recipient, amount, dest_weight)
+			Self::do_transfer(origin, multi_asset, para_id, recipient, amount, dest_weight)
 		}
 
 		#[pallet::weight(195_000_000 + Pallet::<T>::estimate_transfer_weight())]
@@ -184,11 +184,8 @@ pub mod pallet {
 
 			Ok(())
 		}
-
-		pub fn derive_assetid(asset: common::XTransferAsset) -> common::XTransferAssetId {
-			asset.into()
-		}
 	}
+
 	#[derive(PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, TypeInfo)]
 	pub enum TransferType {
 		/// Transfer assets reserved by the origin chain
@@ -362,25 +359,19 @@ pub mod pallet {
 
 #[cfg(test)]
 mod test {
+	use crate::xcm::mock::*;
 	use cumulus_primitives_core::ParaId;
-	use frame_support::{assert_err, assert_noop, assert_ok, traits::Currency};
+	use frame_support::{assert_err, assert_noop, assert_ok};
 	use polkadot_parachain::primitives::Sibling;
 	use sp_runtime::traits::AccountIdConversion;
-	use sp_runtime::{AccountId32, MultiAddress};
+	use sp_runtime::{AccountId32, DispatchError};
 	use sp_std::convert::TryInto;
 
-	use xcm::latest::{
-		prelude::*, AssetId::Concrete, Error as XcmError, Fungibility::Fungible, MultiAsset,
-		MultiLocation, Result as XcmResult,
-	};
+	use xcm::latest::{prelude::*, MultiLocation};
 	use xcm_simulator::TestExt;
 
-	use crate::common::{XTransferAsset, XTransferAssetId};
-	use crate::mock::{
-		para::Assets as ParaAssets, para::Event as ParaEvent, para::Origin as ParaOrigin, para_ext,
-		para_take_events, relay::Origin as RelayOrigin, relay_ext, ParaA, ParaB, ParaBalances,
-		ParaC, Relay, RelayBalances, TestNet, XcmTransfer, ALICE, BOB,
-	};
+	use crate::pallet_assets_wrapper;
+	use crate::pallet_assets_wrapper::XTransferAssetInfo;
 	use assert_matches::assert_matches;
 
 	fn para_a_account() -> AccountId32 {
@@ -404,32 +395,89 @@ mod test {
 	}
 
 	#[test]
-	fn test_asset_creating() {
+	fn test_asset_register() {
 		TestNet::reset();
 
 		ParaA::execute_with(|| {
+			// register first asset, id = 0
 			let para_a_location: MultiLocation = MultiLocation {
 				parents: 1,
 				interior: X1(Parachain(1)),
 			};
-			let para_a_asset: XTransferAsset = para_a_location.try_into().unwrap();
+			let para_a_asset: pallet_assets_wrapper::XTransferAsset =
+				para_a_location.try_into().unwrap();
 
-			assert_ok!(ParaAssets::force_create(
-				ParaOrigin::root(),
+			// should be failed if origin is from sudo user
+			assert_err!(
+				ParaAssetsWrapper::force_register_asset(
+					Some(ALICE).into(),
+					para_a_asset.clone().into(),
+					ALICE,
+					1
+				),
+				DispatchError::BadOrigin
+			);
+
+			assert_ok!(ParaAssetsWrapper::force_register_asset(
+				para::Origin::root(),
 				para_a_asset.clone().into(),
 				ALICE,
-				false,
 				1
 			));
 
-			let ev = para_take_events();
-			let expected_ev: Vec<ParaEvent> =
-				[pallet_assets::Event::ForceCreated(para_a_asset.clone().into(), ALICE).into()]
-					.to_vec();
+			let ev: Vec<para::Event> = para_take_events();
+			let expected_ev: Vec<para::Event> =
+				[pallet_assets_wrapper::Event::ForceAssetRegistered(
+					0u32.into(),
+					para_a_asset.clone(),
+				)
+				.into()]
+				.to_vec();
 			assert_matches!(ev, expected_ev);
+			assert_eq!(ParaAssetsWrapper::id(&para_a_asset).unwrap(), 0u32);
+			assert_eq!(
+				ParaAssetsWrapper::asset(&0u32.into()).unwrap(),
+				para_a_asset
+			);
+			assert_eq!(ParaAssets::total_supply(0u32.into()), 0);
 
-			// check total supply
-			assert_eq!(ParaAssets::total_supply(para_a_asset.clone().into()), 0);
+			// same asset register again, should be failed
+			assert_noop!(
+				ParaAssetsWrapper::force_register_asset(
+					para::Origin::root(),
+					para_a_asset.clone().into(),
+					ALICE,
+					1
+				),
+				pallet_assets_wrapper::Error::<para::Runtime>::AssetAlreadyExist
+			);
+
+			// register another asset, id = 1
+			let para_b_location: MultiLocation = MultiLocation {
+				parents: 1,
+				interior: X1(Parachain(2)),
+			};
+			let para_b_asset: pallet_assets_wrapper::XTransferAsset =
+				para_b_location.try_into().unwrap();
+			assert_ok!(ParaAssetsWrapper::force_register_asset(
+				para::Origin::root(),
+				para_b_asset.clone().into(),
+				ALICE,
+				1
+			));
+			assert_eq!(ParaAssetsWrapper::id(&para_b_asset).unwrap(), 1u32);
+			assert_eq!(
+				ParaAssetsWrapper::asset(&1u32.into()).unwrap(),
+				para_b_asset
+			);
+
+			// unregister asset
+			assert_ok!(ParaAssetsWrapper::force_unregister_asset(
+				para::Origin::root(),
+				1
+			));
+			assert_eq!(ParaAssetsWrapper::id(&para_b_asset), None);
+			assert_eq!(ParaAssetsWrapper::asset(&1u32.into()), None);
 		});
 	}
 
@@ -441,15 +489,15 @@ mod test {
 			parents: 1,
 			interior: X1(Parachain(1)),
 		};
-		let para_a_asset: XTransferAsset = para_a_location.try_into().unwrap();
+		let para_a_asset: pallet_assets_wrapper::XTransferAsset =
+			para_a_location.try_into().unwrap();
 
 		ParaB::execute_with(|| {
 			// ParaB register the native asset of paraA
-			assert_ok!(ParaAssets::force_create(
-				ParaOrigin::root(),
+			assert_ok!(ParaAssetsWrapper::force_register_asset(
+				para::Origin::root(),
 				para_a_asset.clone().into(),
 				ALICE,
-				false,
 				1
 			));
 		});
@@ -465,10 +513,11 @@ mod test {
 			));
 
 			assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
+			assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 10);
 		});
 
 		ParaB::execute_with(|| {
-			assert_eq!(ParaAssets::balance(para_a_asset.into(), &BOB), 10 - 1);
+			assert_eq!(ParaAssets::balance(0u32.into(), &BOB), 10 - 1);
 		});
 	}
 
@@ -480,15 +529,15 @@ mod test {
 			parents: 1,
 			interior: X1(Parachain(1)),
 		};
-		let para_a_asset: XTransferAsset = para_a_location.try_into().unwrap();
+		let para_a_asset: pallet_assets_wrapper::XTransferAsset =
+			para_a_location.try_into().unwrap();
 
 		ParaB::execute_with(|| {
 			// ParaB register the native asset of paraA
-			assert_ok!(ParaAssets::force_create(
-				ParaOrigin::root(),
+			assert_ok!(ParaAssetsWrapper::force_register_asset(
+				para::Origin::root(),
 				para_a_asset.clone().into(),
 				ALICE,
-				false,
 				1
 			));
 		});
@@ -504,13 +553,11 @@ mod test {
 			));
 
 			assert_eq!(ParaBalances::free_balance(&ALICE), 1_000 - 10);
+			assert_eq!(ParaBalances::free_balance(&sibling_b_account()), 10);
 		});
 
 		ParaB::execute_with(|| {
-			assert_eq!(
-				ParaAssets::balance(para_a_asset.clone().into(), &BOB),
-				10 - 1
-			);
+			assert_eq!(ParaAssets::balance(0u32.into(), &BOB), 10 - 1);
 		});
 
 		// now, let's transfer back to paraA
@@ -525,10 +572,7 @@ mod test {
 				1,
 			));
 
-			assert_eq!(
-				ParaAssets::balance(para_a_asset.clone().into(), &BOB),
-				9 - 5
-			);
+			assert_eq!(ParaAssets::balance(0u32.into(), &BOB), 9 - 5);
 		});
 
 		ParaA::execute_with(|| {
@@ -538,21 +582,4 @@ mod test {
 
 	#[test]
 	fn test_transfer_to_unresolve_parachain() {}
-
-	#[test]
-	fn test_dump_assetid() {
-		let ID: u32 = 2000;
-		let KAR_KEY: [u8; 2] = [0, 128];
-
-		let kar_location: MultiLocation = MultiLocation {
-			parents: 1,
-			interior: X2(Parachain(ID), GeneralKey(KAR_KEY.to_vec())),
-		};
-		let kar: XTransferAsset = kar_location.try_into().unwrap();
-
-		assert_eq!(
-			XcmTransfer::derive_assetid(kar),
-			43514260372231685835281715822895635823
-		);
-	}
 }

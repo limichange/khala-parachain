@@ -1,7 +1,7 @@
 pub use self::xcm_helper::*;
 
 pub mod xcm_helper {
-	use crate::common::XTransferAsset;
+	use crate::pallet_assets_wrapper::{XTransferAsset, XTransferAssetId, XTransferAssetInfo};
 	use cumulus_primitives_core::ParaId;
 	use frame_support::pallet_prelude::*;
 	use sp_runtime::traits::CheckedConversion;
@@ -41,12 +41,17 @@ pub mod xcm_helper {
 		}
 	}
 
-	pub struct ConcreteAssetsMatcher<AssetId, Balance>(PhantomData<(AssetId, Balance)>);
-	impl<AssetId: Clone + From<XTransferAsset>, Balance: Clone + From<u128>>
-		MatchesFungibles<AssetId, Balance> for ConcreteAssetsMatcher<AssetId, Balance>
+	pub struct ConcreteAssetsMatcher<AssetId, Balance, AssetsInfo>(
+		PhantomData<(AssetId, Balance, AssetsInfo)>,
+	);
+	impl<
+			AssetId: Clone + From<XTransferAssetId>,
+			Balance: Clone + From<u128>,
+			AssetsInfo: XTransferAssetInfo,
+		> MatchesFungibles<AssetId, Balance> for ConcreteAssetsMatcher<AssetId, Balance, AssetsInfo>
 	{
 		fn matches_fungibles(a: &MultiAsset) -> result::Result<(AssetId, Balance), MatchError> {
-			log::trace!(
+			log::error!(
 				target: LOG_TARGET,
 				"ConcreteAssetsMatcher check fungible {:?}.",
 				a.clone(),
@@ -59,11 +64,17 @@ pub mod xcm_helper {
 				.clone()
 				.try_into()
 				.map_err(|_| MatchError::AssetIdConversionFailed)?;
-
+			let asset_id: XTransferAssetId =
+				AssetsInfo::id(&xtransfer_asset).ok_or(MatchError::AssetNotFound)?;
+			log::error!(
+				target: LOG_TARGET,
+				"ConcreteAssetsMatcher asset id: {:?}.",
+				asset_id.clone(),
+			);
 			let amount = amount
 				.try_into()
 				.map_err(|_| MatchError::AmountToBalanceConversionFailed)?;
-			Ok((xtransfer_asset.into(), amount))
+			Ok((asset_id.into(), amount))
 		}
 	}
 

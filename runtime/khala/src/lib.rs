@@ -614,7 +614,7 @@ parameter_types! {
 impl pallet_assets::Config for Runtime {
     type Event = Event;
     type Balance = Balance;
-    type AssetId = pallet_assets_wrapper::XTransferAssetId;
+    type AssetId = XTransferAssetId;
     type Currency = Balances;
     type ForceOrigin = EnsureRoot<AccountId>;
     type AssetDeposit = AssetDeposit;
@@ -854,7 +854,7 @@ pub type FungiblesTransactor = FungiblesAdapter<
     // Use this fungibles implementation:
     Assets,
     // Use this currency when it is a fungible asset matching the given location or name:
-    xcm_helper::ConcreteAssetsMatcher<pallet_assets_wrapper::XTransferAssetId, Balance, AssetsWrapper>,
+    xcm_helper::ConcreteAssetsMatcher<XTransferAssetId, Balance, AssetsWrapper>,
     // Convert an XCM MultiLocation into a local account id:
     LocationToAccountId,
     // Our chain's account ID type (we can't get away without mentioning it explicitly):

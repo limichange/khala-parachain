@@ -18,11 +18,11 @@ use sp_runtime::{
 
 use cumulus_primitives_core::{ChannelStatus, GetChannelInfo, ParaId};
 use polkadot_parachain::primitives::Sibling;
-use xcm::v1::prelude::*;
+use xcm::latest::prelude::*;
 use xcm_builder::{
-	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, CurrencyAdapter, EnsureXcmOrigin,
-	FixedWeightBounds, FungiblesAdapter, LocationInverter, NativeAsset, ParentIsDefault,
-	RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	AccountId32Aliases, AllowTopLevelPaidExecutionFrom, AllowUnpaidExecutionFrom, CurrencyAdapter,
+	EnsureXcmOrigin, FixedWeightBounds, FungiblesAdapter, LocationInverter, NativeAsset,
+	ParentIsDefault, RelayChainAsNative, SiblingParachainAsNative, SiblingParachainConvertsVia,
 	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 	UsingComponents,
 };
@@ -51,6 +51,7 @@ construct_runtime!(
 		System: frame_system::{Pallet, Call, Config, Storage, Event<T>},
 		Balances: pallet_balances::{Pallet, Call, Storage, Config<T>, Event<T>},
 		Assets: pallet_assets::{Pallet, Call, Storage, Event<T>},
+		AssetsWrapper: pallet_assets_wrapper::{Pallet, Call, Storage, Event<T>},
 
 		// Parachain staff
 		ParachainInfo: pallet_parachain_info::{Pallet, Storage, Config},
@@ -62,7 +63,6 @@ construct_runtime!(
 
 		// local palelts
 		XcmTransfer: pallet_xcm_transfer::{Pallet, Call, Event<T>, Storage},
-		AssetsWrapper: pallet_assets_wrapper::{Pallet, Call, Storage, Event<T>},
 	}
 );
 
@@ -179,7 +179,11 @@ match_type! {
 		MultiLocation { parents: 1, interior: X1(Plurality { id: BodyId::Executive, .. }) }
 	};
 }
-pub type Barrier = (TakeWeightCredit, AllowTopLevelPaidExecutionFrom<Everything>);
+pub type Barrier = (
+	TakeWeightCredit,
+	AllowTopLevelPaidExecutionFrom<Everything>,
+	AllowUnpaidExecutionFrom<Everything>,
+);
 
 /// Means for transacting the native currency on this chain.
 pub type CurrencyTransactor = CurrencyAdapter<
@@ -290,5 +294,5 @@ impl pallet_xcm_transfer::Config for Runtime {
 
 impl pallet_assets_wrapper::Config for Runtime {
 	type Event = Event;
-	type AssetsCommitteeOrigin = frame_system::EnsureRoot<Self::AccountId>;
+	type AssetsCommitteeOrigin = EnsureRoot<AccountId>;
 }

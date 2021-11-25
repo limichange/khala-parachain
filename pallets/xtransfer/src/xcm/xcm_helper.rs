@@ -51,7 +51,7 @@ pub mod xcm_helper {
 		> MatchesFungibles<AssetId, Balance> for ConcreteAssetsMatcher<AssetId, Balance, AssetsInfo>
 	{
 		fn matches_fungibles(a: &MultiAsset) -> result::Result<(AssetId, Balance), MatchError> {
-			log::error!(
+			log::trace!(
 				target: LOG_TARGET,
 				"ConcreteAssetsMatcher check fungible {:?}.",
 				a.clone(),
@@ -66,11 +66,6 @@ pub mod xcm_helper {
 				.map_err(|_| MatchError::AssetIdConversionFailed)?;
 			let asset_id: XTransferAssetId =
 				AssetsInfo::id(&xtransfer_asset).ok_or(MatchError::AssetNotFound)?;
-			log::error!(
-				target: LOG_TARGET,
-				"ConcreteAssetsMatcher asset id: {:?}.",
-				asset_id.clone(),
-			);
 			let amount = amount
 				.try_into()
 				.map_err(|_| MatchError::AmountToBalanceConversionFailed)?;
